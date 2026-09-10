@@ -1,0 +1,90 @@
+x-app: &app
+  build: .
+  environment: &env
+    ENV: dev
+    MARKET: in
+    LOG_LEVEL: INFO
+    AWS_REGION: ap-south-1
+    AWS_ENDPOINT_URL: http://localstack:4566
+    AWS_ACCESS_KEY_ID: test
+    AWS_SECRET_ACCESS_KEY: test
+    DATABASE_URL: postgresql+asyncpg://shop:shop@postgres:5432/shopglobe
+    REDIS_URL: redis://redis:6379/0
+    SQS_QUEUE_URL: http://localstack:4566/000000000000/payments
+    SNS_TOPIC_ARN: arn:aws:sns:ap-south-1:000000000000:notifications
+    S3_BUCKET: shopglobe-media
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: shop, POSTGRES_PASSWORD: shop, POSTGRES_DB: shopglobe }
+    ports: ["5432:5432"]
+    volumes: ["./seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U shop"], interval: 5s, retries: 10 }
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10 }
+
+  localstack:
+    image: localstack/localstack:3
+    environment: { SERVICES: "sqs,sns,s3", DEBUG: "0" }
+    ports: ["4566:4566"]
+    volumes: ["./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro"]
+
+  edge-gateway:
+    <<: *app
+    command: ["services.edge_gateway.main"]
+    environment: { <<: *env, SERVICE_NAME: edge-gateway }
+    ports: ["8000:8000"]
+    depends_on: [auth-svc, catalog-svc, cart-svc, order-svc]
+
+  auth-svc:
+    <<: *app
+    command: ["services.auth_svc.main"]
+    environment: { <<: *env, SERVICE_NAME: auth-svc, JWT_SECRET: local-dev-secret }
+    ports: ["8001:8000"]
+
+  catalog-svc:
+    <<: *app
+    command: ["services.catalog_svc.main"]
+    environment: { <<: *env, SERVICE_NAME: catalog-svc }
+    ports: ["8002:8000"]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  cart-svc:
+    <<: *app
+    command: ["services.cart_svc.main"]
+    environment: { <<: *env, SERVICE_NAME: cart-svc, CATALOG_URL: http://catalog-svc:8000 }
+    ports: ["8003:8000"]
+    depends_on: [catalog-svc, redis]
+
+  order-svc:
+    <<: *app
+    command: ["services.order_svc.main"]
+    environment: { <<: *env, SERVICE_NAME: order-svc, CART_URL: http://cart-svc:8000 }
+    ports: ["8004:8000"]
+    depends_on: [cart-svc, localstack]
+
+  payment-worker:
+    <<: *app
+    command: ["services.payment_worker.main"]
+    environment: { <<: *env, SERVICE_NAME: payment-worker }
+    ports: ["8005:8000"]
+    depends_on: [localstack]
+
+  notify-svc:
+    <<: *app
+    command: ["services.notify_svc.main"]
+    environment: { <<: *env, SERVICE_NAME: notify-svc }
+    ports: ["8006:8000"]
+    depends_on: [localstack]
+
+  media-svc:
+    <<: *app
+    command: ["services.media_svc.main"]
+    environment: { <<: *env, SERVICE_NAME: media-svc }
+    ports: ["8007:8000"]
+    depends_on: [localstack]

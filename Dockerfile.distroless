@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+# Day 1 variant. Smaller attack surface, and NO SHELL -- so `kubectl exec` into
+# it fails and you must use an ephemeral debug container instead:
+#   kubectl debug -it <pod> --image=nicolaka/netshoot --target=<container>
+FROM python:3.12-slim AS builder
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+FROM gcr.io/distroless/python3-debian12:nonroot
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app
+COPY --from=builder /install/lib/python3.12/site-packages /app/site-packages
+COPY libs /app/libs
+COPY services /app/services
+ENV PYTHONPATH=/app:/app/site-packages
+WORKDIR /app
+USER nonroot
+EXPOSE 8000
+ENTRYPOINT ["python", "-m"]
+CMD ["services.edge_gateway.main"]
