@@ -58,7 +58,7 @@ services.each { svc ->
                     }
                 }
                 scriptPath('Jenkinsfile')
-                lightweight(true)
+                lightweight(false)
             }
         }
     }
@@ -87,7 +87,7 @@ pipelineJob('shopglobe/terraform-plan') {
                 }
             }
             scriptPath('Jenkinsfile.terraform')
-            lightweight(true)
+            lightweight(false)
         }
     }
 }
