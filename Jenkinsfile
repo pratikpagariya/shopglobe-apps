@@ -110,13 +110,13 @@ EOF
               # A commit. ArgoCD sees the diff and reconciles the cluster.
               # Which means: git log IS the deploy history, and git revert IS
               # the rollback.
-              mkdir -p values/dev
-              yq -i ".image.tag = \\"${IMAGE_TAG}\\"" values/dev/${SERVICE}.yaml 2>/dev/null \
-                || printf 'image:\\n  tag: "%s"\\n' "${IMAGE_TAG}" > values/dev/${SERVICE}.yaml
+              mkdir -p values/dev/${SERVICE}
+              yq -i ".image.tag = \\"${IMAGE_TAG}\\"" values/dev/${SERVICE}/values.yaml 2>/dev/null \
+                || printf 'image:\\n  tag: "%s"\\n' "${IMAGE_TAG}" > values/dev/${SERVICE}/values.yaml
 
               git config user.email "jenkins@shopglobe.local"
               git config user.name  "jenkins"
-              git add values/dev/${SERVICE}.yaml
+              git add values/dev/${SERVICE}/values.yaml
               git diff --cached --quiet && echo "no change" && exit 0
               git commit -m "deploy(${SERVICE}): ${IMAGE_TAG} [ci skip]"
               git push
