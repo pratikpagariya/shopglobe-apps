@@ -1,4 +1,4 @@
-fastapi==0.115.6
+fastapi==0.141.1
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pydantic-settings==2.7.0
@@ -10,4 +10,5 @@ asyncpg==0.30.0
 alembic==1.14.0
 redis==5.2.1
 boto3==1.35.90
-pyjwt==2.10.1
+pyjwt==2.15.0
+starlette==1.7.0
