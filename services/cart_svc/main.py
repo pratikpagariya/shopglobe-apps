@@ -4,6 +4,7 @@ The point of this service: Redis is a CACHE, so losing it must DEGRADE us
 (slower, straight to catalog) not BREAK us. That is why redis is deliberately
 NOT in the readiness checks.
 """
+
 import json
 import random
 
@@ -59,8 +60,9 @@ async def _product(pid: int) -> dict:
         # Redis down: count it, log nothing per-request, fall through to origin.
         ERRORS.labels(S.service_name).inc()
 
-    r = await client.get(f"{S.catalog_url}/products/{pid}",
-                         headers={"x-request-id": request_id_var.get()})
+    r = await client.get(
+        f"{S.catalog_url}/products/{pid}", headers={"x-request-id": request_id_var.get()}
+    )
     if r.status_code == 404:
         raise HTTPException(404, "product not found")
     r.raise_for_status()
@@ -91,8 +93,7 @@ async def add_item(user_id: str, item: AddItem) -> dict:
 async def get_cart(user_id: str) -> dict:
     ids = CARTS.get(user_id, [])
     items = [await _product(i) for i in ids]
-    return {"user_id": user_id, "items": items,
-            "total": round(sum(i["price"] for i in items), 2)}
+    return {"user_id": user_id, "items": items, "total": round(sum(i["price"] for i in items), 2)}
 
 
 @app.delete("/cart/{user_id}")

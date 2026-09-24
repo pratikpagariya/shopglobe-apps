@@ -7,6 +7,7 @@ Gotchas worth knowing out loud:
   - a Lambda in a VPC gets an ENI and then needs a NAT to reach the internet
   - reserved concurrency is what stops a Lambda stampede exhausting RDS
 """
+
 import json
 import os
 import urllib.parse
@@ -33,9 +34,13 @@ def handler(event, context):
             f"request_id: {body.get('request_id', '-')}\n"
         )
         dest = f"receipts/{body.get('order_id', 'unknown')}.txt"
-        s3.put_object(Bucket=BUCKET or src, Key=dest,
-                      Body=receipt.encode(), ContentType="text/plain",
-                      CacheControl="private, max-age=0, no-store")
+        s3.put_object(
+            Bucket=BUCKET or src,
+            Key=dest,
+            Body=receipt.encode(),
+            ContentType="text/plain",
+            CacheControl="private, max-age=0, no-store",
+        )
         out.append(dest)
 
     # Structured, single-line log -- CloudWatch Logs Insights can query it.

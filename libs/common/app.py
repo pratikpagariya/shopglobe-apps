@@ -23,17 +23,31 @@ from libs.common import Settings, request_id_var, setup_logging
 # `path` is the ROUTE TEMPLATE ("/products/{pid}"), never the raw URL. Using the
 # raw path would put an unbounded value in a label and multiply your time series
 # by the number of distinct product ids -> Prometheus OOM.
-REQUESTS = Counter(
-    "http_requests_total", "HTTP requests", ["service", "method", "path", "status"]
-)
+REQUESTS = Counter("http_requests_total", "HTTP requests", ["service", "method", "path", "status"])
 # Buckets are clustered around the 300ms latency SLO. Default buckets jump
 # 0.25 -> 0.5 -> 1.0, which makes a p95 near 300ms pure interpolation guesswork.
 LATENCY = Histogram(
     "http_request_duration_seconds",
     "HTTP request duration",
     ["service", "method", "path"],
-    buckets=(0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3,
-             0.4, 0.5, 0.75, 1.0, 2.5, 5.0),
+    buckets=(
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.15,
+        0.2,
+        0.25,
+        0.3,
+        0.4,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+    ),
 )
 INFLIGHT = Gauge("http_requests_inflight", "In-flight requests", ["service"])
 READY = Gauge("service_ready", "1 if /readyz passes", ["service"])
@@ -137,7 +151,12 @@ def make_app(
 def run(app: FastAPI, settings: Settings) -> None:
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=settings.port, log_config=None,
-                # Must exceed the ALB idle timeout (60s) or the ALB reuses a
-                # connection this app just closed -> intermittent 502s.
-                timeout_keep_alive=75)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=settings.port,
+        log_config=None,
+        # Must exceed the ALB idle timeout (60s) or the ALB reuses a
+        # connection this app just closed -> intermittent 502s.
+        timeout_keep_alive=75,
+    )

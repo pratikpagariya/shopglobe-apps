@@ -1,4 +1,5 @@
 """edge-gateway: the ONLY internet-facing service. ALB -> here -> everything else."""
+
 import asyncio
 
 import httpx
@@ -8,8 +9,14 @@ from libs.common import Settings, request_id_var
 from libs.common.app import make_app, run
 
 S = Settings(service_name="edge-gateway")
-UPSTREAMS = {"auth": S.auth_url, "catalog": S.catalog_url, "cart": S.cart_url,
-             "order": S.order_url, "notify": S.notify_url, "media": S.media_url}
+UPSTREAMS = {
+    "auth": S.auth_url,
+    "catalog": S.catalog_url,
+    "cart": S.cart_url,
+    "order": S.order_url,
+    "notify": S.notify_url,
+    "media": S.media_url,
+}
 client: httpx.AsyncClient | None = None
 
 
@@ -51,13 +58,17 @@ async def proxy(svc: str, path: str, request: Request) -> Response:
     # idempotency key. Blind retries on non-idempotent writes duplicate orders.
     for attempt in range(S.upstream_retries + 1):
         try:
-            r = await client.request(request.method, f"{base}/{path}", content=body,
-                                     headers=headers, params=request.query_params)
-            return Response(r.content, r.status_code,
-                            media_type=r.headers.get("content-type"))
+            r = await client.request(
+                request.method,
+                f"{base}/{path}",
+                content=body,
+                headers=headers,
+                params=request.query_params,
+            )
+            return Response(r.content, r.status_code, media_type=r.headers.get("content-type"))
         except httpx.HTTPError as exc:
             last = exc
-            await asyncio.sleep(0.05 * (2 ** attempt))  # exponential backoff
+            await asyncio.sleep(0.05 * (2**attempt))  # exponential backoff
     raise HTTPException(504, f"upstream {svc} unreachable: {last}")
 
 

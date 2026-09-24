@@ -5,6 +5,7 @@ where the classic SQS bug lives: if processing takes longer than the queue's
 visibility timeout, SQS hands the same message to another consumer while you
 are still working on it, and you process it forever.
 """
+
 import asyncio
 import json
 import random
@@ -18,8 +19,12 @@ from libs.common.app import make_app, run
 
 S = Settings(service_name="payment-worker")
 PROCESSED = Counter("queue_messages_processed_total", "Processed", ["service", "result"])
-DURATION = Histogram("queue_processing_duration_seconds", "Processing time", ["service"],
-                     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30))
+DURATION = Histogram(
+    "queue_processing_duration_seconds",
+    "Processing time",
+    ["service"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30),
+)
 DEPTH = Gauge("queue_depth", "ApproximateNumberOfMessages", ["service"])
 AGE = Gauge("queue_oldest_message_age_seconds", "Oldest message age", ["service"])
 
@@ -35,15 +40,16 @@ async def _poll_forever() -> None:
     while running:
         try:
             resp = sqs.receive_message(
-                QueueUrl=S.sqs_queue_url, MaxNumberOfMessages=10,
-                WaitTimeSeconds=20, AttributeNames=["ApproximateReceiveCount"],
+                QueueUrl=S.sqs_queue_url,
+                MaxNumberOfMessages=10,
+                WaitTimeSeconds=20,
+                AttributeNames=["ApproximateReceiveCount"],
             )
             for msg in resp.get("Messages", []):
                 await _handle(msg)
             attrs = sqs.get_queue_attributes(
                 QueueUrl=S.sqs_queue_url,
-                AttributeNames=["ApproximateNumberOfMessages",
-                                "ApproximateAgeOfOldestMessage"],
+                AttributeNames=["ApproximateNumberOfMessages", "ApproximateAgeOfOldestMessage"],
             )["Attributes"]
             DEPTH.labels(S.service_name).set(int(attrs.get("ApproximateNumberOfMessages", 0)))
             AGE.labels(S.service_name).set(int(attrs.get("ApproximateAgeOfOldestMessage", 0)))

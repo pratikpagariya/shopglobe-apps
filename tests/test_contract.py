@@ -1,7 +1,7 @@
 """Tests for the contract the DevOps layer depends on. If these pass, your
 probes, ServiceMonitor, SLO queries and Rollouts analysis will work.
 """
-import pytest
+
 from fastapi.testclient import TestClient
 
 from libs.common import Settings
@@ -15,12 +15,13 @@ def _app(checks=None):
 def test_healthz_ignores_dependencies():
     """LIVENESS must not depend on anything external. If it did, one DB blip
     would restart every pod at once."""
+
     async def broken():
         raise RuntimeError("database is down")
 
     with TestClient(_app({"db": broken})) as c:
-        assert c.get("/healthz").status_code == 200      # still alive
-        assert c.get("/readyz").status_code == 503       # but not ready
+        assert c.get("/healthz").status_code == 200  # still alive
+        assert c.get("/readyz").status_code == 503  # but not ready
 
 
 def test_readyz_reports_which_check_failed():
@@ -44,7 +45,10 @@ def test_readyz_passes_when_deps_healthy():
 
 def test_request_id_is_echoed_and_generated():
     with TestClient(_app()) as c:
-        assert c.get("/healthz", headers={"x-request-id": "abc123"}).headers["x-request-id"] == "abc123"
+        assert (
+            c.get("/healthz", headers={"x-request-id": "abc123"}).headers["x-request-id"]
+            == "abc123"
+        )
         assert len(c.get("/healthz").headers["x-request-id"]) == 16
 
 

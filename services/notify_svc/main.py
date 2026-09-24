@@ -1,5 +1,6 @@
 """notify-svc: publishes to SNS. Its sibling is lambdas/receipt_gen, which does
 the same job as a function so you can compare cold start and cost."""
+
 import boto3
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -35,7 +36,9 @@ async def notify(n: Notification) -> dict:
     if n.channel not in ("email", "sms", "push"):
         raise HTTPException(422, f"unsupported channel: {n.channel}")
     resp = sns.publish(
-        TopicArn=S.sns_topic_arn, Subject=n.subject[:100], Message=n.body,
+        TopicArn=S.sns_topic_arn,
+        Subject=n.subject[:100],
+        Message=n.body,
         MessageAttributes={
             "channel": {"DataType": "String", "StringValue": n.channel},
             "market": {"DataType": "String", "StringValue": S.market},

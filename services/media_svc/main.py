@@ -4,6 +4,7 @@ The interesting parts are cache correctness and cost:
   - presigned URLs mean bytes never pass through this pod (no egress via NAT)
   - VERSIONED KEYS mean you never pay for a CloudFront invalidation
 """
+
 import hashlib
 import time
 
@@ -46,15 +47,23 @@ async def presign_upload(req: UploadRequest) -> dict:
     try:
         url = s3.generate_presigned_url(
             "put_object",
-            Params={"Bucket": S.s3_bucket, "Key": key, "ContentType": req.content_type,
-                    # Immutable: safe because the key changes when content does.
-                    "CacheControl": "public, max-age=31536000, immutable"},
+            Params={
+                "Bucket": S.s3_bucket,
+                "Key": key,
+                "ContentType": req.content_type,
+                # Immutable: safe because the key changes when content does.
+                "CacheControl": "public, max-age=31536000, immutable",
+            },
             ExpiresIn=900,
         )
     except ClientError as exc:
-        raise HTTPException(502, f"s3 error: {exc}")
-    return {"upload_url": url, "key": key, "expires_in": 900,
-            "cdn_url": f"https://{S.cdn_domain}/{key}" if S.cdn_domain else None}
+        raise HTTPException(502, f"s3 error: {exc}") from exc
+    return {
+        "upload_url": url,
+        "key": key,
+        "expires_in": 900,
+        "cdn_url": f"https://{S.cdn_domain}/{key}" if S.cdn_domain else None,
+    }
 
 
 @app.get("/media/{key:path}/url")
@@ -62,14 +71,14 @@ async def get_url(key: str) -> dict:
     try:
         s3.head_object(Bucket=S.s3_bucket, Key=key)
     except ClientError:
-        raise HTTPException(404, "object not found")
+        raise HTTPException(404, "object not found") from None
     if S.cdn_domain:
         # Serve through the CDN: cached at the edge, and the bucket stays
         # private behind Origin Access Control.
         return {"url": f"https://{S.cdn_domain}/{key}", "via": "cloudfront"}
-    url = s3.generate_presigned_url("get_object",
-                                    Params={"Bucket": S.s3_bucket, "Key": key},
-                                    ExpiresIn=3600)
+    url = s3.generate_presigned_url(
+        "get_object", Params={"Bucket": S.s3_bucket, "Key": key}, ExpiresIn=3600
+    )
     return {"url": url, "via": "s3-presigned"}
 
 

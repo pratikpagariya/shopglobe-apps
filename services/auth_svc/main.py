@@ -1,5 +1,6 @@
 """auth-svc: issues and verifies JWTs. Signing key comes from Secrets Manager
 via External Secrets in-cluster -- never from git."""
+
 import time
 
 import jwt
@@ -27,12 +28,16 @@ class TokenRequest(BaseModel):
 @app.post("/token")
 async def issue(req: TokenRequest) -> dict:
     now = int(time.time())
-    claims = {"sub": req.user_id, "iat": now, "exp": now + S.jwt_ttl_seconds,
-              "market": S.market, "scope": "customer"}
+    claims = {
+        "sub": req.user_id,
+        "iat": now,
+        "exp": now + S.jwt_ttl_seconds,
+        "market": S.market,
+        "scope": "customer",
+    }
     # `kid` is how you rotate with zero downtime: publish the new key alongside
     # the old, accept both until every old token has expired, then drop the old.
-    token = jwt.encode(claims, S.jwt_secret, algorithm="HS256",
-                       headers={"kid": S.jwt_kid})
+    token = jwt.encode(claims, S.jwt_secret, algorithm="HS256", headers={"kid": S.jwt_kid})
     return {"access_token": token, "expires_in": S.jwt_ttl_seconds, "kid": S.jwt_kid}
 
 
@@ -44,9 +49,9 @@ async def verify(authorization: str = Header("")) -> dict:
     try:
         claims = jwt.decode(authorization[7:], S.jwt_secret, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "token expired")
+        raise HTTPException(401, "token expired") from None
     except jwt.InvalidTokenError as exc:
-        raise HTTPException(401, f"invalid token: {exc}")
+        raise HTTPException(401, f"invalid token: {exc}") from exc
     return {"valid": True, "claims": claims}
 
 
@@ -59,7 +64,7 @@ async def admin(authorization: str = Header("")) -> dict:
     try:
         claims = jwt.decode(authorization[7:], S.jwt_secret, algorithms=["HS256"])
     except jwt.InvalidTokenError:
-        raise HTTPException(401, "invalid token")
+        raise HTTPException(401, "invalid token") from None
     if claims.get("scope") != "admin":
         raise HTTPException(403, "scope 'admin' required")
     return {"ok": True}

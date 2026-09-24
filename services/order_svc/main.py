@@ -4,6 +4,7 @@ Async decoupling: the user does not wait for a payment provider. The cost is
 that you must now handle at-least-once delivery, which is what the idempotency
 key is for.
 """
+
 import json
 import uuid
 
@@ -68,10 +69,15 @@ async def create_order(req: OrderRequest) -> dict:
 
     sqs.send_message(
         QueueUrl=S.sqs_queue_url,
-        MessageBody=json.dumps({"order_id": order_id, "user_id": req.user_id,
-                                "amount": req.amount,
-                                "idempotency_key": req.idempotency_key,
-                                "request_id": request_id_var.get()}),
+        MessageBody=json.dumps(
+            {
+                "order_id": order_id,
+                "user_id": req.user_id,
+                "amount": req.amount,
+                "idempotency_key": req.idempotency_key,
+                "request_id": request_id_var.get(),
+            }
+        ),
     )
     return {"order_id": order_id, "status": "pending"}
 

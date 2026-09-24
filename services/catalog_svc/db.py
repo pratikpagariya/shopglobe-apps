@@ -1,4 +1,5 @@
 """catalog-svc data layer. Pool sizing here is the thing that takes RDS down."""
+
 from decimal import Decimal
 
 from sqlalchemy import ForeignKey, Numeric, String, select
@@ -34,9 +35,11 @@ def make_engine(s: Settings):
     max_connections of ~100 -> 'FATAL: too many connections'. Either shrink the
     pool, or put PgBouncer / RDS Proxy in front."""
     return create_async_engine(
-        s.database_url, pool_size=5, max_overflow=2,
-        pool_pre_ping=True,   # survives an RDS Multi-AZ failover
-        pool_recycle=1800,    # beat any idle-connection reaper in the middle
+        s.database_url,
+        pool_size=5,
+        max_overflow=2,
+        pool_pre_ping=True,  # survives an RDS Multi-AZ failover
+        pool_recycle=1800,  # beat any idle-connection reaper in the middle
     )
 
 
@@ -44,5 +47,12 @@ def make_sessionmaker(engine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
-__all__ = ["Base", "Category", "Product", "make_engine", "make_sessionmaker",
-           "select", "selectinload"]
+__all__ = [
+    "Base",
+    "Category",
+    "Product",
+    "make_engine",
+    "make_sessionmaker",
+    "select",
+    "selectinload",
+]
