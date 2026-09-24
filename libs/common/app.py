@@ -135,7 +135,14 @@ def make_app(
             try:
                 await check()
             except Exception as exc:
-                failed[name] = str(exc)[:200]
+                # Keep the exception TYPE, not just its message. A bare
+                # str(exc) turns "socket.gaierror: [Errno -2]" into a string
+                # that could have come from four different layers -- which is
+                # exactly how a dependency failure becomes an hour of guessing.
+                failed[name] = f"{type(exc).__name__}: {exc}"[:300]
+                # And log the full traceback once, so the cause is recoverable
+                # from logs rather than only from a probe response body.
+                log.warning("readiness_check_failed", check=name, exc_info=True)
         READY.labels(settings.service_name).set(0 if failed else 1)
         if failed:
             return JSONResponse({"ready": False, "failed": failed}, status_code=503)
