@@ -23,9 +23,14 @@ pipeline {
       steps {
         container('tools') {
           sh '''
+            # Python packages use underscores -- module names cannot contain
+            # hyphens. ECR repos, k8s Services and DNS labels cannot contain
+            # underscores. Same service, two spellings. Translate explicitly
+            # rather than letting the mismatch surface as a missing path.
+            SVC_DIR=$(echo "${SERVICE}" | tr '-' '_')
             pip install --quiet ruff
-            ruff check services/${SERVICE} libs/
-            ruff format --check services/${SERVICE} libs/
+            ruff check services/${SVC_DIR} libs/
+            ruff format --check services/${SVC_DIR} libs/
           '''
         }
       }
