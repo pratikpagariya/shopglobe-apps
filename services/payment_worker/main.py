@@ -28,7 +28,9 @@ DURATION = Histogram(
 DEPTH = Gauge("queue_depth", "ApproximateNumberOfMessages", ["service"])
 AGE = Gauge("queue_oldest_message_age_seconds", "Oldest message age", ["service"])
 
-sqs = None
+# The client is created at import (so it is never Optional); the poll task
+# needs a running event loop, so that one still starts in _startup.
+sqs = boto3.client("sqs", **S.boto_kwargs)
 task: asyncio.Task | None = None
 running = True
 
@@ -80,8 +82,7 @@ async def _handle(msg: dict) -> None:
 
 
 async def _startup() -> None:
-    global sqs, task
-    sqs = boto3.client("sqs", **S.boto_kwargs)
+    global task
     task = asyncio.create_task(_poll_forever())
 
 

@@ -20,7 +20,8 @@ services:
     image: postgres:16-alpine
     environment: { POSTGRES_USER: shop, POSTGRES_PASSWORD: shop, POSTGRES_DB: shopglobe }
     ports: ["5432:5432"]
-    volumes: ["./seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro"]
+    # No seed.sql mount: the schema comes from Alembic (catalog-migrate below),
+    # the same migrations the cluster runs.
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U shop"], interval: 5s, retries: 10 }
 
   redis:
@@ -47,12 +48,22 @@ services:
     environment: { <<: *env, SERVICE_NAME: auth-svc, JWT_SECRET: local-dev-secret }
     ports: ["8001:8000"]
 
+  # The same command the ArgoCD PreSync hook runs, so local and in-cluster
+  # schemas come from the same migrations. One-shot: it exits 0, then
+  # catalog-svc starts.
+  catalog-migrate:
+    <<: *app
+    command: ["alembic", "-c", "services/catalog_svc/alembic.ini", "upgrade", "head"]
+    environment: { <<: *env, SERVICE_NAME: catalog-migrate }
+    restart: "no"
+    depends_on: { postgres: { condition: service_healthy } }
+
   catalog-svc:
     <<: *app
     command: ["services.catalog_svc.main"]
     environment: { <<: *env, SERVICE_NAME: catalog-svc }
     ports: ["8002:8000"]
-    depends_on: { postgres: { condition: service_healthy } }
+    depends_on: { catalog-migrate: { condition: service_completed_successfully } }
 
   cart-svc:
     <<: *app

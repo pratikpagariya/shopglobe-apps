@@ -9,19 +9,15 @@ from libs.common import Settings, request_id_var
 from libs.common.app import make_app, run
 
 S = Settings(service_name="notify-svc")
-sns = None
-
-
-async def _startup() -> None:
-    global sns
-    sns = boto3.client("sns", **S.boto_kwargs)
+# Created at import, not in _startup, so the type is never Optional.
+sns = boto3.client("sns", **S.boto_kwargs)
 
 
 async def _check_sns() -> None:
     sns.get_topic_attributes(TopicArn=S.sns_topic_arn)
 
 
-app = make_app(S, {"sns": _check_sns}, _startup)
+app = make_app(S, {"sns": _check_sns})
 
 
 class Notification(BaseModel):

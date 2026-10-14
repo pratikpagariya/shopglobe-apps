@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextvars
 import logging
 import sys
+from collections.abc import MutableMapping
+from typing import Any
 
 import structlog
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -69,7 +71,10 @@ class Settings(BaseSettings):
         return kw
 
 
-def _add_request_id(_, __, event_dict: dict) -> dict:
+# The signature structlog's Processor type demands: (logger, method_name, event_dict).
+def _add_request_id(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
     event_dict["request_id"] = request_id_var.get()
     return event_dict
 

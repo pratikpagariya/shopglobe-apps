@@ -110,8 +110,10 @@ supplies credentials. No access keys, anywhere.
    these exist so the service runs without more infrastructure than the lesson needs. It also
    means **these services are not actually horizontally scalable**, which is itself the point:
    externalising session state is why `cart-svc` has Redis at all.
-3. **Alembic isn't wired up** — `seed.sql` creates the schema for local dev. Day 4 adds Alembic as
-   an ArgoCD `PreSync` hook, which is where migrations belong (never on app startup — N pods
-   would race the same database).
+3. **Migrations are Alembic, run once per deploy** (`services/catalog_svc/migrations/`). In the
+   cluster they run as an ArgoCD `PreSync` Job; locally as the `catalog-migrate` compose service —
+   the same command in both. Never on app startup: N pods would race the same database. Each app
+   env gets its own database (`shopglobe_dev/_stage/_prod`) on one RDS instance; the migration
+   creates it on first run. `seed.sql` survives only for the legacy EC2 stack.
 4. **No tracing backend.** `x-request-id` propagates through all 8 and lands in every log line,
    so you can reconstruct a request in Loki. Real OpenTelemetry spans are week 2.

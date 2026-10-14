@@ -64,14 +64,20 @@ services.each { svc ->
     }
 }
 
-// Infrastructure gets a differently SHAPED pipeline, not just different steps:
-// plan always, apply only behind a manual gate. Different blast radius,
-// different controls.
-pipelineJob('shopglobe/terraform-plan') {
-    description('fmt -> validate -> tflint -> plan. Apply is a separate, gated job.')
+// Infrastructure gets a differently SHAPED pipeline, not just different steps.
+// Today it validates only: fmt, validate, tflint, with no AWS credentials. It
+// is named for what it does -- a job called "plan" that never plans is a lie
+// someone eventually trusts. removeAction('DELETE') on the seed job removes
+// the old terraform-plan job on the next seed run.
+//
+// Triggered by hand, like every job here: the cluster has no public ingress
+// for a GitHub webhook to reach (CICD-FLOW.md).
+pipelineJob('shopglobe/terraform-validate') {
+    description('fmt -> validate -> tflint on every stack. No plan, no apply, no AWS credentials.')
 
     parameters {
-        choiceParam('STACK', ['prod', 'stage', 'dev'], 'Which stack to plan')
+        // First choice = the default in the Build with Parameters form.
+        choiceParam('STACK', ['all', 'prod', 'stage', 'dev', 'legacy'], 'Which stack(s) to validate')
     }
 
     logRotator {

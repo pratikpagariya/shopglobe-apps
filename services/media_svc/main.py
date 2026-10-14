@@ -17,19 +17,15 @@ from libs.common import Settings
 from libs.common.app import make_app, run
 
 S = Settings(service_name="media-svc")
-s3 = None
-
-
-async def _startup() -> None:
-    global s3
-    s3 = boto3.client("s3", **S.boto_kwargs)
+# Created at import, not in _startup, so the type is never Optional.
+s3 = boto3.client("s3", **S.boto_kwargs)
 
 
 async def _check_bucket() -> None:
     s3.head_bucket(Bucket=S.s3_bucket)
 
 
-app = make_app(S, {"s3": _check_bucket}, _startup)
+app = make_app(S, {"s3": _check_bucket})
 
 
 class UploadRequest(BaseModel):

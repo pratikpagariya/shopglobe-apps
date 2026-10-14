@@ -1,3 +1,6 @@
+-- LEGACY EC2 STACK ONLY (scripts/seed-rds.sh, scripts/build-artifact.sh).
+-- EKS and docker-compose get their schema from Alembic:
+-- services/catalog_svc/migrations/ (0001 schema, 0002 these same demo rows).
 CREATE TABLE IF NOT EXISTS categories (
   id SERIAL PRIMARY KEY, name VARCHAR(64) UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS products (

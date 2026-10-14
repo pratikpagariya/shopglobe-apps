@@ -17,17 +17,13 @@ UPSTREAMS = {
     "notify": S.notify_url,
     "media": S.media_url,
 }
-client: httpx.AsyncClient | None = None
-
-
-async def _startup() -> None:
-    global client
-    client = httpx.AsyncClient(timeout=S.upstream_timeout_seconds)
+# Created at import, not in _startup: it opens no connection until first use,
+# and the type is never Optional.
+client = httpx.AsyncClient(timeout=S.upstream_timeout_seconds)
 
 
 async def _shutdown() -> None:
-    if client:
-        await client.aclose()
+    await client.aclose()
 
 
 async def _check_auth() -> None:
@@ -35,7 +31,7 @@ async def _check_auth() -> None:
     r.raise_for_status()
 
 
-app = make_app(S, {"auth": _check_auth}, _startup, _shutdown)
+app = make_app(S, {"auth": _check_auth}, on_shutdown=_shutdown)
 
 
 @app.api_route("/api/{svc}/{path:path}", methods=["GET", "POST", "DELETE"])

@@ -8,19 +8,14 @@ from libs.common.app import make_app, run
 from services.catalog_svc.db import Product, make_engine, make_sessionmaker, select, selectinload
 
 S = Settings(service_name="catalog-svc")
-engine = None
-Session = None
-
-
-async def _startup() -> None:
-    global engine, Session
-    engine = make_engine(S)
-    Session = make_sessionmaker(engine)
+# Created at import: an async engine is lazy -- the pool opens its first
+# connection on first use, not here -- and the type is never Optional.
+engine = make_engine(S)
+Session = make_sessionmaker(engine)
 
 
 async def _shutdown() -> None:
-    if engine:
-        await engine.dispose()
+    await engine.dispose()
 
 
 async def _check_db() -> None:
@@ -28,7 +23,7 @@ async def _check_db() -> None:
         await conn.execute(text("SELECT 1"))
 
 
-app = make_app(S, {"postgres": _check_db}, _startup, _shutdown)
+app = make_app(S, {"postgres": _check_db}, on_shutdown=_shutdown)
 
 
 @app.get("/products")

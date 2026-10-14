@@ -17,21 +17,15 @@ from libs.common import Settings, request_id_var
 from libs.common.app import make_app, run
 
 S = Settings(service_name="order-svc")
-sqs = None
-client: httpx.AsyncClient | None = None
+# Created at import, not in _startup, so the type is never Optional.
+sqs = boto3.client("sqs", **S.boto_kwargs)
+client = httpx.AsyncClient(timeout=S.upstream_timeout_seconds)
 ORDERS: dict[str, dict] = {}
 SEEN: dict[str, str] = {}  # idempotency_key -> order_id
 
 
-async def _startup() -> None:
-    global sqs, client
-    sqs = boto3.client("sqs", **S.boto_kwargs)
-    client = httpx.AsyncClient(timeout=S.upstream_timeout_seconds)
-
-
 async def _shutdown() -> None:
-    if client:
-        await client.aclose()
+    await client.aclose()
 
 
 async def _check_sqs() -> None:
@@ -43,7 +37,7 @@ async def _check_cart() -> None:
     r.raise_for_status()
 
 
-app = make_app(S, {"sqs": _check_sqs, "cart": _check_cart}, _startup, _shutdown)
+app = make_app(S, {"sqs": _check_sqs, "cart": _check_cart}, on_shutdown=_shutdown)
 
 
 class OrderRequest(BaseModel):

@@ -22,22 +22,16 @@ HITS = Counter("cache_hits_total", "Cache hits", ["service"])
 MISSES = Counter("cache_misses_total", "Cache misses", ["service"])
 ERRORS = Counter("cache_errors_total", "Cache unavailable", ["service"])
 
-rds: redis.Redis | None = None
-client: httpx.AsyncClient | None = None
+# Created at import, not in _startup: neither opens a connection until first
+# use, so there is nothing to wait for -- and the type is never Optional.
+rds = redis.from_url(S.redis_url, socket_timeout=0.25, decode_responses=True)
+client = httpx.AsyncClient(timeout=S.upstream_timeout_seconds)
 CARTS: dict[str, list[int]] = {}  # demo-only; real impl stores this in Redis
 
 
-async def _startup() -> None:
-    global rds, client
-    rds = redis.from_url(S.redis_url, socket_timeout=0.25, decode_responses=True)
-    client = httpx.AsyncClient(timeout=S.upstream_timeout_seconds)
-
-
 async def _shutdown() -> None:
-    if rds:
-        await rds.aclose()
-    if client:
-        await client.aclose()
+    await rds.aclose()
+    await client.aclose()
 
 
 async def _check_catalog() -> None:
@@ -46,7 +40,7 @@ async def _check_catalog() -> None:
 
 
 # Only catalog is a hard dependency. Redis is not -- see module docstring.
-app = make_app(S, {"catalog": _check_catalog}, _startup, _shutdown)
+app = make_app(S, {"catalog": _check_catalog}, on_shutdown=_shutdown)
 
 
 async def _product(pid: int) -> dict:

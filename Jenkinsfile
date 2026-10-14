@@ -1,5 +1,6 @@
 pipeline {
-  // Runs on the kaniko pod template: kaniko + tools + trivy containers.
+  // Runs on the kaniko pod template: kaniko + tools + trivy + yq containers,
+  // plus the auto-injected jnlp container, which has git.
   agent { label 'kaniko' }
 
   options {
@@ -9,8 +10,9 @@ pipeline {
   }
 
   environment {
-    REGISTRY  = '355653384401.dkr.ecr.ap-south-1.amazonaws.com'
-    REGION    = 'ap-south-1'
+    REGISTRY    = '355653384401.dkr.ecr.ap-south-1.amazonaws.com'
+    REGION      = 'ap-south-1'
+    GITOPS_REPO = 'https://github.com/pratikpagariya/shopglobe-gitops.git'
     // Tag = git SHA. Not :latest, not a version you type. This is what makes
     // "which code is running?" answerable, and it is why ECR is IMMUTABLE.
     IMAGE_TAG = "${env.GIT_COMMIT?.take(12) ?: 'dev'}"
@@ -28,9 +30,15 @@ pipeline {
             # underscores. Same service, two spellings. Translate explicitly
             # rather than letting the mismatch surface as a missing path.
             SVC_DIR=$(echo "${SERVICE}" | tr '-' '_')
-            pip install --quiet ruff
+
+            # Pinned versions from requirements-dev.txt -- the same ruff and
+            # mypy the laptop runs. An unpinned `pip install ruff` lets CI and
+            # the laptop disagree about whether the same code is clean.
+            # Installed once; the test stage reuses this container.
+            pip install --quiet -r requirements-dev.txt
             ruff check services/${SVC_DIR} libs/
             ruff format --check services/${SVC_DIR} libs/
+            mypy libs services/${SVC_DIR}
           '''
         }
       }
@@ -39,10 +47,9 @@ pipeline {
     stage('test') {
       steps {
         container('tools') {
-          sh '''
-            pip install --quiet -r requirements-dev.txt
-            pytest -q --junitxml=report.xml
-          '''
+          // The coverage threshold lives in pyproject.toml, not here, so
+          // `make test` on a laptop fails exactly the way CI does.
+          sh 'pytest --junitxml=report.xml'
         }
       }
       post {
@@ -50,7 +57,25 @@ pipeline {
       }
     }
 
+    stage('image exists?') {
+      steps {
+        container('tools') {
+          script {
+            // ECR tags are IMMUTABLE, so re-running a build of a commit that
+            // was already pushed fails at push. Same SHA = same image: skip the
+            // build, still scan, still deploy. Exit 2 = the check itself broke
+            // (credentials, IAM) -- fail loudly rather than guess.
+            def rc = sh(returnStatus: true, script: 'python scripts/image_exists.py')
+            if (rc > 1) { error('scripts/image_exists.py failed -- see its stderr above') }
+            env.IMAGE_EXISTS = (rc == 0) ? 'true' : 'false'
+            if (env.IMAGE_EXISTS == 'true') { echo "${REPO}:${IMAGE_TAG} already in ECR -- skipping build" }
+          }
+        }
+      }
+    }
+
     stage('build + push') {
+      when { expression { env.IMAGE_EXISTS != 'true' } }
       steps {
         container('kaniko') {
           sh '''
@@ -92,34 +117,60 @@ EOF
     stage('deploy: commit tag to gitops') {
       when { expression { params.DEPLOY } }
       steps {
-        container('tools') {
-          withCredentials([usernamePassword(
-              credentialsId: 'github',
-              usernameVariable: 'GH_USER',
-              passwordVariable: 'GH_TOKEN')]) {
-            sh '''
-              apt-get update -qq && apt-get install -y -qq git curl
-              curl -sL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-              chmod +x /usr/local/bin/yq
+        withCredentials([usernamePassword(
+            credentialsId: 'github',
+            usernameVariable: 'GH_USER',
+            passwordVariable: 'GH_TOKEN')]) {
 
-              rm -rf /tmp/gitops
-              git clone -q https://${GH_USER}:${GH_TOKEN}@github.com/${GH_USER}/shopglobe-gitops.git /tmp/gitops
-              cd /tmp/gitops
+          // Every tool in this stage comes from a pinned image. No apt-get,
+          // no `curl .../releases/latest` on every build.
+          container('jnlp') {
+            sh '''
+              rm -rf gitops
+              # The token is read from the environment by a credential helper,
+              # only at the moment git asks -- never in the clone URL (visible
+              # in `ps`) and never written to .git/config.
+              git config --global credential.helper '!f() { echo "username=${GH_USER}"; echo "password=${GH_TOKEN}"; }; f'
+              git config --global user.email "jenkins@shopglobe.local"
+              git config --global user.name  "jenkins"
+              git clone -q "${GITOPS_REPO}" gitops
+            '''
+          }
+
+          container('yq') {
+            sh '''
+              F="gitops/values/dev/${SERVICE}/values.yaml"
+              # A missing file is a misconfiguration, not something CI should
+              # invent: the chart needs module, repository and env that only a
+              # human can write. Fail loudly instead of writing half a file.
+              test -f "$F" || { echo "ERROR: $F missing -- add it to shopglobe-gitops first"; exit 1; }
 
               # THIS LINE IS THE DEPLOY. Not kubectl apply. Not helm --set.
               # A commit. ArgoCD sees the diff and reconciles the cluster.
               # Which means: git log IS the deploy history, and git revert IS
               # the rollback.
-              mkdir -p values/dev/${SERVICE}
-              yq -i ".image.tag = \\"${IMAGE_TAG}\\"" values/dev/${SERVICE}/values.yaml 2>/dev/null \
-                || printf 'image:\\n  tag: "%s"\\n' "${IMAGE_TAG}" > values/dev/${SERVICE}/values.yaml
+              yq -i '.image.tag = strenv(IMAGE_TAG)' "$F"
+            '''
+          }
 
-              git config user.email "jenkins@shopglobe.local"
-              git config user.name  "jenkins"
-              git add values/dev/${SERVICE}/values.yaml
-              git diff --cached --quiet && echo "no change" && exit 0
-              git commit -m "deploy(${SERVICE}): ${IMAGE_TAG} [ci skip]"
-              git push
+          container('jnlp') {
+            sh '''
+              cd gitops
+              git add "values/dev/${SERVICE}/values.yaml"
+              git diff --cached --quiet && { echo "already at ${IMAGE_TAG} -- nothing to deploy"; exit 0; }
+              git commit -q -m "deploy(${SERVICE}): ${IMAGE_TAG} [ci skip]"
+
+              # Eight service jobs push to ONE repo. disableConcurrentBuilds only
+              # serialises builds of the SAME job, so a libs/common change that
+              # rebuilds all 8 makes them race here. Each touches a different
+              # file, so rebase-and-retry always resolves cleanly.
+              for i in 1 2 3 4 5; do
+                git push -q origin HEAD:main && exit 0
+                echo "push rejected (another service got there first) -- rebase, attempt $i"
+                sleep $((i * 2))
+                git pull -q --rebase origin main
+              done
+              echo "ERROR: could not push after 5 attempts"; exit 1
             '''
           }
         }

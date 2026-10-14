@@ -14,3 +14,9 @@ warn_unused_ignores = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q --cov=libs --cov-report=term-missing"
+
+[tool.coverage.report]
+# The gate. It lives here, not in the Jenkinsfile, so `make test` on a laptop
+# fails the same way CI does. 85 sits just under today's 90% on libs/ -- a
+# ratchet: raise it as tests are added, never lower it.
+fail_under = 85
