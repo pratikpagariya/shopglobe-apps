@@ -12,6 +12,7 @@ import random
 import time
 
 import boto3
+import structlog
 from prometheus_client import Counter, Gauge, Histogram
 
 from libs.common import Settings, request_id_var
@@ -26,7 +27,10 @@ DURATION = Histogram(
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30),
 )
 DEPTH = Gauge("queue_depth", "ApproximateNumberOfMessages", ["service"])
-AGE = Gauge("queue_oldest_message_age_seconds", "Oldest message age", ["service"])
+INFLIGHT = Gauge(
+    "queue_messages_inflight", "Received but not yet deleted (NotVisible)", ["service"]
+)
+log = structlog.get_logger()
 
 # The client is created at import (so it is never Optional); the poll task
 # needs a running event loop, so that one still starts in _startup.
@@ -37,11 +41,18 @@ running = True
 
 async def _poll_forever() -> None:
     """Long polling (WaitTimeSeconds=20): one API call parked for 20s instead of
-    20 empty calls a second. Cheaper AND lower latency."""
-    global running
+    20 empty calls a second. Cheaper AND lower latency.
+
+    Every boto3 call BLOCKS, so each runs in a worker thread (asyncio.to_thread).
+    Called directly, a 20s long poll froze the event loop -- and with an empty
+    queue this loop had no other await, so /healthz and /readyz never got a
+    turn. On EKS the pod flapped Ready/NotReady and liveness kept restarting
+    it. (Shutdown can wait up to 20s for an in-flight poll thread; the 30s
+    terminationGracePeriodSeconds covers that plus the 5s drain.)"""
     while running:
         try:
-            resp = sqs.receive_message(
+            resp = await asyncio.to_thread(
+                sqs.receive_message,
                 QueueUrl=S.sqs_queue_url,
                 MaxNumberOfMessages=10,
                 WaitTimeSeconds=20,
@@ -49,13 +60,28 @@ async def _poll_forever() -> None:
             )
             for msg in resp.get("Messages", []):
                 await _handle(msg)
-            attrs = sqs.get_queue_attributes(
-                QueueUrl=S.sqs_queue_url,
-                AttributeNames=["ApproximateNumberOfMessages", "ApproximateAgeOfOldestMessage"],
+            # The age of the oldest message is NOT a queue attribute -- it only
+            # exists as the CloudWatch metric ApproximateAgeOfOldestMessage
+            # (the SQS module alarms on it). Asking for it here made EVERY call
+            # fail with InvalidAttributeName, so these gauges were never set.
+            attrs = (
+                await asyncio.to_thread(
+                    sqs.get_queue_attributes,
+                    QueueUrl=S.sqs_queue_url,
+                    AttributeNames=[
+                        "ApproximateNumberOfMessages",
+                        "ApproximateNumberOfMessagesNotVisible",
+                    ],
+                )
             )["Attributes"]
             DEPTH.labels(S.service_name).set(int(attrs.get("ApproximateNumberOfMessages", 0)))
-            AGE.labels(S.service_name).set(int(attrs.get("ApproximateAgeOfOldestMessage", 0)))
+            INFLIGHT.labels(S.service_name).set(
+                int(attrs.get("ApproximateNumberOfMessagesNotVisible", 0))
+            )
         except Exception:
+            # Never swallow silently: a bare except here is what hid the bad
+            # attribute name until the pod ran with real probes on EKS.
+            log.warning("poll_failed", exc_info=True)
             await asyncio.sleep(2)
 
 
@@ -70,7 +96,9 @@ async def _handle(msg: dict) -> None:
         await asyncio.sleep(random.uniform(0.05, 0.4))
         if body.get("amount", 0) > 100000:
             raise ValueError("amount exceeds provider limit")  # -> retries -> DLQ
-        sqs.delete_message(QueueUrl=S.sqs_queue_url, ReceiptHandle=msg["ReceiptHandle"])
+        await asyncio.to_thread(
+            sqs.delete_message, QueueUrl=S.sqs_queue_url, ReceiptHandle=msg["ReceiptHandle"]
+        )
         PROCESSED.labels(S.service_name, "ok").inc()
     except Exception:
         # Do NOT delete. SQS redelivers; after maxReceiveCount it goes to the
@@ -94,7 +122,9 @@ async def _shutdown() -> None:
 
 
 async def _check_sqs() -> None:
-    sqs.get_queue_attributes(QueueUrl=S.sqs_queue_url, AttributeNames=["QueueArn"])
+    await asyncio.to_thread(
+        sqs.get_queue_attributes, QueueUrl=S.sqs_queue_url, AttributeNames=["QueueArn"]
+    )
 
 
 app = make_app(S, {"sqs": _check_sqs}, _startup, _shutdown)
